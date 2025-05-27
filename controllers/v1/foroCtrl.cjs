@@ -1,4 +1,4 @@
-const { db } = require('../config/firebase.cjs');
+const { db } = require('../../config/firebase.cjs');
 
 const crearForo = async (req, res) => {
   try {

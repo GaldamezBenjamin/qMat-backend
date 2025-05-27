@@ -1,5 +1,5 @@
-const { db } = require('../config/firebase.cjs');
-const { preguntaSchema } = require('../models/Pregunta.cjs');
+const { db } = require('../../config/firebase.cjs');
+const { preguntaSchema } = require('../../models/Pregunta.cjs');
 
 // CREAR PREGUNTA
 const crearPregunta = async (req, res) => {

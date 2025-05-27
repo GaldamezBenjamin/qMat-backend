@@ -1,15 +1,15 @@
-const { db } = require('../config/firebase.cjs');
+const { db } = require('../../config/firebase.cjs');
 
 const crearCategoria = async (req, res) => {
   try {
-    // Validación
     if (!req.body.nombre || !req.body.descripcion) {
       return res.status(400).send('Faltan datos de la categoría');
     }
 
     const nuevaCategoria = {
       nombre: req.body.nombre,
-      descripcion: req.body.descripcion
+      descripcion: req.body.descripcion,
+      id_super_cat: req.body.id_super_cat || null,
     };
 
     const docRef = await db.collection('categorias').add(nuevaCategoria);
@@ -49,14 +49,14 @@ const obtenerCategoria = async (req, res) => {
 
 const actualizarCategoria = async (req, res) => {
   try {
-    // Validación
     if (!req.body.nombre || !req.body.descripcion) {
       return res.status(400).send('Faltan datos para actualizar la categoría');
     }
 
     const categoriaActualizada = {
       nombre: req.body.nombre,
-      descripcion: req.body.descripcion
+      descripcion: req.body.descripcion,
+      id_super_cat: req.body.id_super_cat || null,
     };
 
     await db.collection('categorias').doc(req.params.id_categoria).update(categoriaActualizada);

@@ -9,23 +9,21 @@ app.use(cors({
 }));
 app.use(express.json());
 
-app.get('/', (req, res) => {
-    res.send('Backend de qMática funcionando!');
-});
+const quizRoutes = require('./routes/v1/quizRoutes.cjs');
+const preguntaRoutes = require('./routes/v1/preguntaRoutes.cjs');
+const usuarioRoutes = require('./routes/v1/usuarioRoutes.cjs');
+const foroRoutes = require('./routes/v1/foroRoutes.cjs');
+const estadisticaRoutes = require('./routes/v1/estadisticaRoutes.cjs');
+const categoriaRoutes = require('./routes/v1/categoriaRoutes.cjs');
+const superCategoriaRoutes = require('./routes/v1/superCategoriaRoutes.cjs');
 
-const quizRoutes = require('./routes/quizRoutes.cjs');
-const preguntaRoutes = require('./routes/preguntaRoutes.cjs');
-const usuarioRoutes = require('./routes/usuarioRoutes.cjs');
-const foroRoutes = require('./routes/foroRoutes.cjs');
-const estadisticaRoutes = require('./routes/estadisticaRoutes.cjs');
-const categoriaRoutes = require('./routes/categoriaRoutes.cjs');
-
-app.use('/api/quizzes', quizRoutes);
-app.use('/api/preguntas', preguntaRoutes);
-app.use('/api/usuarios', usuarioRoutes);
-app.use('/api/foros', foroRoutes);
-app.use('/api/estadisticas', estadisticaRoutes);
-app.use('/api/categorias', categoriaRoutes);
+app.use('/api/v1/quizzes', quizRoutes);
+app.use('/api/v1/preguntas', preguntaRoutes);
+app.use('/api/v1/usuarios', usuarioRoutes);
+app.use('/api/v1/foros', foroRoutes);
+app.use('/api/v1/estadisticas', estadisticaRoutes);
+app.use('/api/v1/categorias', categoriaRoutes);
+app.use('/api/v1/super-categorias', superCategoriaRoutes);
 
 const port = process.env.PORT || 5000;
 

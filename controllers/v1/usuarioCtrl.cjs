@@ -1,5 +1,5 @@
-const { db } = require('../config/firebase.cjs');
-const { usuarioSchema, intentoQuizSchema } = require('../models/Usuario.cjs'); // Opcional
+const { db } = require('../../config/firebase.cjs');
+const { usuarioSchema, intentoQuizSchema } = require('../../models/Usuario.cjs'); // Opcional
 
 const crearUsuario = async (req, res) => {
   try {
