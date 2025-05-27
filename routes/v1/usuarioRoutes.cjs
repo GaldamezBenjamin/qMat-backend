@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const usuario = require('../controllers/v1/usuarioCtrl.cjs');
+const usuario = require('../../controllers/v1/usuarioCtrl.cjs');
 
 router.post('/', usuario.crearUsuario);
 router.get('/', usuario.obtenerUsuarios);

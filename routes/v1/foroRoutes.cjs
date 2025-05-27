@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const foro = require('../controllers/v1/foroCtrl.cjs');
+const foro = require('../../controllers/v1/foroCtrl.cjs');
 
 router.post('/', foro.crearForo);
 router.get('/', foro.obtenerForos);

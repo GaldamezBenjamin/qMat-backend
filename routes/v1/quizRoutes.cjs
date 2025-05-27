@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const quiz = require('../controllers/v1/quizCtrl.cjs');
+const quiz = require('../../controllers/v1/quizCtrl.cjs');
 
 router.post('/', quiz.crearQuiz);
 router.get('/', quiz.obtenerQuizzes);

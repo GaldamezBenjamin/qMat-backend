@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const categoria = require('../controllers/v1/categoriaCtrl.cjs');
+const categoria = require('../../controllers/v1/categoriaCtrl.cjs');
 
 router.post('/', categoria.crearCategoria);
 router.get('/', categoria.obtenerCategorias);

@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const superCategoria = require('../controllers/v1/superCategoriaCtrl.cjs');
+const superCategoria = require('../../controllers/v1/superCategoriaCtrl.cjs');
 
 router.post('/', superCategoria.crearSuperCategoria);
 router.get('/', superCategoria.obtenerSuperCategorias);

@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const pregunta = require('../controllers/v1/preguntaCtrl.cjs');
+const pregunta = require('../../controllers/v1/preguntaCtrl.cjs');
 
 router.post('/', pregunta.crearPregunta);
 router.get('/', pregunta.obtenerPreguntas);
