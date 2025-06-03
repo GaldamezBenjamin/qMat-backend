@@ -1,0 +1,88 @@
+### Prerequisite: Create a Quiz and Questions First
+# You'll need existing quiz IDs and question IDs to create attempts.
+# Use your quizzes.rest and questions.rest files to create them.
+# Example: quiz_id_1 with question_id_A, question_id_B
+
+### 1. Get All Quiz Attempts (Admin Only)
+GET {{$dotenv BASE_URL}}/intentosquizzes
+Authorization: Bearer {{dotenv ADMIN_TOKEN}}
+
+###
+
+### 2. Start a New Quiz Attempt (Any Authenticated User)
+# Replace YOUR_QUIZ_ID_HERE with the ID of an existing quiz.
+POST {{$dotenv BASE_URL}}/intentosquizzes/start
+Content-Type: application/json
+Authorization: Bearer {{$dotenv USER_TOKEN}}
+
+{
+    "id_quiz": "YOUR_QUIZ_ID_HERE"
+}
+
+###
+
+### 3. Get Quiz Attempts by User UID (Authenticated User's Own)
+# Replace {{$dotenv USER_UID}} with the UID of the user whose token is provided.
+GET {{$dotenv BASE_URL}}/intentosquizzes/user/{{$dotenv USER_UID}}
+Authorization: Bearer {{$dotenv USER_TOKEN}}
+
+###
+
+### 4. Get Another User's Quiz Attempts (Admin Only)
+# Replace ANOTHER_USER_UID_HERE with the UID of a different user.
+GET {{$dotenv BASE_URL}}/intentosquizzes/user/ANOTHER_USER_UID
+Authorization: Bearer {{dotenv ADMIN_TOKEN}}
+
+###
+
+### 5. Get a Specific Quiz Attempt by ID (Authenticated User's Own)
+# Replace YOUR_ATTEMPT_ID_HERE with an actual quiz attempt ID from starting a quiz.
+GET {{$dotenv BASE_URL}}/intentosquizzes/YOUR_ATTEMPT_ID_HERE
+Authorization: Bearer {{$dotenv USER_TOKEN}}
+
+###
+
+### 6. Submit Quiz Results (User's Own Attempt)
+# Replace YOUR_ATTEMPT_ID_HERE with the ID of the attempt you started.
+# Replace QUESTION_ID_A, QUESTION_ID_B with actual question IDs from the quiz.
+# Ensure 'respuesta_usuario' matches one of the options (a,b,c,d) and 'es_correcta' is true/false (will be verified by server).
+PUT {{$dotenv BASE_URL}}/intentosquizzes/YOUR_ATTEMPT_ID_HERE/submit
+Content-Type: application/json
+Authorization: Bearer {{$dotenv USER_TOKEN}}
+
+{
+    "respuestas_usuario": [
+        {
+            "id_pregunta": "QUESTION_ID_A",
+            "respuesta_usuario": "b",
+            "es_correcta": true
+        },
+        {
+            "id_pregunta": "QUESTION_ID_B",
+            "respuesta_usuario": "c",
+            "es_correcta": false
+        }
+    ]
+}
+
+###
+
+### 7. Attempt to Submit Results by a Non-Owner/Non-Admin (Should Fail with 403)
+# Replace ANOTHER_ATTEMPT_ID_HERE with an attempt ID belonging to {{$dotenv USER_UID}}.
+# Use a token from a different user (e.g., ANOTHER_USER_TOKEN).
+PUT {{$dotenv BASE_URL}}/intentosquizzes/ANOTHER_ATTEMPT_ID_HERE/submit
+Content-Type: application/json
+Authorization: Bearer ANOTHER_USER_TOKEN
+
+{
+    "respuestas_usuario": []
+}
+
+###
+
+### 8. Delete a Quiz Attempt (Admin Only)
+# Replace YOUR_ATTEMPT_ID_HERE with the ID of the quiz attempt to delete.
+DELETE {{$dotenv BASE_URL}}/intentosquizzes/YOUR_ATTEMPT_ID_HERE
+Authorization: Bearer {{dotenv ADMIN_TOKEN}}
+
+###

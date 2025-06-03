@@ -1,0 +1,99 @@
+### Prerequisite: Create a Subcategory First
+# You'll need a subcategory ID to test `respuestas_por_categoria`
+# Use your sub_categories.rest file to create one if needed.
+
+### 1. Get All Statistics (Admin Only)
+GET {{$dotenv BASE_URL}}/estadisticas
+Authorization: Bearer {{$dotenv ADMIN_TOKEN}}
+
+###
+
+### 2. Get User's Own Statistics (Authenticated User)
+# Use the UID of the user whose token is provided.
+GET {{$dotenv BASE_URL}}/estadisticas/{{$dotenv USER_UID}}
+Authorization: Bearer {{$dotenv USER_TOKEN}}
+
+###
+
+### 3. Get Another User's Statistics (Admin Only)
+# Replace ANOTHER_USER_UID_HERE with the UID of a different user.
+GET {{$dotenv BASE_URL}}/estadisticas/ANOTHER_USER_UID_HERE
+Authorization: Bearer {{$dotenv ADMIN_TOKEN}}
+
+###
+
+### 4. Create/Initialize Statistics for Current User (Authenticated User)
+# This typically happens on first interaction.
+# It will fail with 409 if stats already exist for this UID.
+POST {{$dotenv BASE_URL}}/estadisticas
+Content-Type: application/json
+Authorization: Bearer {{$dotenv USER_TOKEN}}
+
+{
+    "quizzes_completados": 0,
+    "tiempo_promedio": 0,
+    "respuestas_por_categoria": []
+}
+
+###
+
+### 5. Update User's Own Statistics (Partial Update - PUT)
+# Use USER_TOKEN and USER_UID.
+# This will replace the entire 'respuestas_por_categoria' array if provided.
+PUT {{$dotenv BASE_URL}}/estadisticas/{{$dotenv USER_UID}}
+Content-Type: application/json
+Authorization: Bearer {{$dotenv USER_TOKEN}}
+
+{
+    "quizzes_completados": 5,
+    "tiempo_promedio": 12.5,
+    "respuestas_por_categoria": [
+        {
+            "id_subcategoria": "YOUR_SUBCATEGORY_ID_HERE",
+            "correctas": 10,
+            "incorrectas": 2
+        }
+    ]
+}
+
+###
+
+### 6. Atomically Update Subcategory Stats (PATCH)
+# This is ideal for adding/updating quiz results for a specific subcategory.
+# Use USER_TOKEN and USER_UID.
+# Replace YOUR_SUBCATEGORY_ID_HERE with an actual subcategory ID.
+PATCH {{$dotenv BASE_URL}}/estadisticas/{{$dotenv USER_UID}}/subcategories
+Content-Type: application/json
+Authorization: Bearer {{$dotenv USER_TOKEN}}
+
+{
+    "id_subcategoria": "YOUR_SUBCATEGORY_ID_HERE",
+    "correctas": 3,
+    "incorrectas": 1
+}
+
+###
+
+### 7. Atomically Update Another Subcategory Stat (PATCH - New Subcategory)
+# This will add a new entry to the array.
+# Use USER_TOKEN and USER_UID.
+# Replace ANOTHER_SUBCATEGORY_ID_HERE with a different subcategory ID.
+PATCH {{$dotenv BASE_URL}}/estadisticas/{{$dotenv USER_UID}}/subcategories
+Content-Type: application/json
+Authorization: Bearer {{$dotenv USER_TOKEN}}
+
+{
+    "id_subcategoria": "ANOTHER_SUBCATEGORY_ID_HERE",
+    "correctas": 5,
+    "incorrectas": 0
+}
+
+###
+
+### 8. Delete Statistics (Admin Only)
+# Replace UID_OF_USER_TO_DELETE with the UID of the user whose stats you want to delete.
+# Use ADMIN_TOKEN.
+DELETE {{$dotenv BASE_URL}}/estadisticas/{{$dotenv USER_UID}}
+Authorization: Bearer {{$dotenv ADMIN_TOKEN}}
+
+###

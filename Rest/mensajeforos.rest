@@ -1,0 +1,67 @@
+### Prerequisite: Create a Forum First
+# Ensure you have a forum created, e.g., "Discusión sobre Álgebra Avanzada" with ID "some_forum_id_from_firestore"
+# You can use the forums.rest file to create one if needed.
+
+### 1. Get All Messages for a Specific Forum (Authenticated User)
+# Replace YOUR_FORUM_ID_HERE with the ID of an existing forum.
+GET {{$dotenv BASE_URL}}/mensajesforos/forum/YOUR_FORUM_ID_HERE
+Authorization: Bearer {{$dotenv USER_TOKEN}}
+
+###
+
+### 2. Create a New Message in a Forum (Any Authenticated User)
+# Replace YOUR_FORUM_ID_HERE with the ID of the forum where you want to post.
+# This message will be created by the user whose token is provided.
+POST {{$dotenv BASE_URL}}/mensajesforos
+Content-Type: application/json
+Authorization: Bearer {{$dotenv USER_TOKEN}}
+
+{
+    "contenido": "¡Excelente tema! Tengo una pregunta sobre la resolución de ecuaciones cuadráticas.",
+    "id_foro": "YOUR_FORUM_ID_HERE"
+}
+
+###
+
+### 3. Get a Specific Message by ID (Authenticated User)
+# Replace YOUR_MESSAGE_ID_HERE with an actual message ID from creation.
+GET {{$dotenv BASE_URL}}/mensajesforos/YOUR_MESSAGE_ID_HERE
+Authorization: Bearer {{$dotenv USER_TOKEN}}
+
+###
+
+### 4. Update a Message (Only Author or Admin)
+# Replace YOUR_MESSAGE_ID_HERE with the ID of the message to update.
+# Use USER_TOKEN if updating a message created by that user.
+# Use ADMIN_TOKEN if updating any message as an admin.
+PUT {{$dotenv BASE_URL}}/mensajesforos/YOUR_MESSAGE_ID_HERE
+Content-Type: application/json
+Authorization: Bearer {{$dotenv USER_TOKEN}}
+
+{
+    "contenido": "¡Excelente tema! (Editado) Tengo una pregunta sobre la resolución de ecuaciones cuadráticas y sus aplicaciones."
+}
+
+###
+
+### 5. Delete a Message (Only Author or Admin)
+# Replace YOUR_MESSAGE_ID_HERE with the ID of the message to delete.
+# Use USER_TOKEN if deleting a message created by that user.
+# Use ADMIN_TOKEN if deleting any message as an admin.
+DELETE {{$dotenv BASE_URL}}/mensajesforos/YOUR_MESSAGE_ID_HERE
+Authorization: Bearer {{$dotenv USER_TOKEN}}
+
+###
+
+### 6. Attempt to Update a Message by a Non-Author/Non-Admin (Should Fail with 403)
+# Replace YOUR_MESSAGE_ID_HERE with the ID of a message NOT created by 'ANOTHER_USER_TOKEN'.
+# Use a token from a user different from the one who created the message.
+PUT {{$dotenv BASE_URL}}/mensajesforos/YOUR_MESSAGE_ID_HERE
+Content-Type: application/json
+Authorization: Bearer ANOTHER_USER_TOKEN
+
+{
+    "contenido": "Contenido falso para intentar modificar."
+}
+
+###

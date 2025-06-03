@@ -1,27 +1,47 @@
-const { auth } = require('../config/firebase.cjs');
+const { admin } = require('../config/firebase.cjs');
 
-const requireAdmin = async (req, res, next) => {
-  try {
-    const token = req.headers.authorization?.split('Bearer ')[1];
-    if (!token) {
-      return res.status(401).send('Se requiere autenticación');
+const verifyToken = async (req, res, next) => {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ message: 'Acceso denegado. No se proporcionó token de autenticación o formato inválido.' });
     }
 
-    const decodedToken = await auth.verifyIdToken(token);
-    const uid = decodedToken.uid;
+    const idToken = authHeader.split('Bearer ')[1];
 
-    // Obtener el usuario de la base de datos para verificar el rol
-    const userDoc = await db.collection('Usuarios').doc(uid).get();
-    if (!userDoc.exists || userDoc.data().rol !== 'administrador') {
-      return res.status(403).send('No tienes permiso para realizar esta acción');
+    try {
+        const decodedToken = await admin.auth().verifyIdToken(idToken);
+        req.user = decodedToken; // Attach the decoded token to the request object
+        next();
+    } catch (error) {
+        console.error('Error al verificar token de Firebase:', error);
+        if (error.code === 'auth/id-token-expired') {
+            return res.status(401).json({ message: 'Token de autenticación expirado.', error: error.message });
+        }
+        res.status(403).json({ message: 'Token de autenticación inválido.', error: error.message });
     }
-
-    req.uid = uid; // Opcional: pasar el UID a las rutas
-    next();
-  } catch (error) {
-    console.error(error);
-    return res.status(401).send('Token inválido');
-  }
 };
 
-module.exports = { requireAdmin };
+// Middleware for role-based access control
+const authorizeRoles = (...allowedRoles) => {
+    return (req, res, next) => {
+        if (!req.user || !req.user.rol) { // Assuming 'rol' is stored in custom claims or fetched later
+            // If 'rol' is not in custom claims, you'll need to fetch it from Firestore here
+            // For simplicity, we assume 'rol' is part of custom claims or attached during user creation
+            return res.status(403).json({ message: 'Acceso denegado. Rol de usuario no definido.' });
+        }
+
+        // For this example, we assume 'rol' is a custom claim set in Firebase Auth
+        // If not, you'd fetch the user document here:
+        // const userDoc = await db.collection('usuarios').doc(req.user.uid).get();
+        // const userRol = userDoc.data()?.rol;
+        const userRol = req.user.rol; // Assuming 'rol' is directly in custom claims
+
+        if (!allowedRoles.includes(userRol)) {
+            return res.status(403).json({ message: `Acceso denegado. Se requiere uno de los siguientes roles: ${allowedRoles.join(', ')}.` });
+        }
+        next();
+    };
+};
+
+module.exports = { verifyToken, authorizeRoles };
