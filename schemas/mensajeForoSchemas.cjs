@@ -15,5 +15,5 @@ const updateForumMessageSchema = z.object({
 
 module.exports = {
     createForumMessageSchema,
-    updateForumMessageSchema,
+    updateForumMessageSchema
 };

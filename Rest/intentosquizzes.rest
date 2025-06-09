@@ -30,8 +30,8 @@ Authorization: Bearer {{$dotenv USER_TOKEN}}
 
 ### 4. Get Another User's Quiz Attempts (Admin Only)
 # Replace ANOTHER_USER_UID_HERE with the UID of a different user.
-GET {{$dotenv BASE_URL}}/intentosquizzes/user/ANOTHER_USER_UID
-Authorization: Bearer {{dotenv ADMIN_TOKEN}}
+GET {{$dotenv BASE_URL}}/intentosquizzes/user/ANOTHER_USER_UID_HERE
+Authorization: Bearer {{$dotenv ADMIN_TOKEN}}
 
 ###
 

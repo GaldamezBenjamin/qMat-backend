@@ -1,5 +1,5 @@
 const { db, admin } = require('../config/firebase.cjs');
-const { createForumSchema, updateForumSchema } = require('../schemas/forosSchemas.cjs');
+const { createForumSchema, updateForumSchema } = require('../schemas/foroSchemas.cjs');
 const { z } = require('zod');
 
 // Get all forums

@@ -1,5 +1,5 @@
 const { db, admin } = require('../config/firebase.cjs');
-const { createForumMessageSchema, updateForumMessageSchema } = require('../schemas/forosSchemas.cjs');
+const { createForumMessageSchema, updateForumMessageSchema } = require('../schemas/mensajeForoSchemas.cjs');
 const { z } = require('zod');
 
 // Get all messages for a specific forum

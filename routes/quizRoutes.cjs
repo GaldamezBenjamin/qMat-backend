@@ -12,6 +12,9 @@ router.get('/', quizController.getAllQuizzes);
 // Get quiz by ID (Accessible to all authenticated users)
 router.get('/:id_quiz', quizController.getQuizById);
 
+// GET /api/quizzes/:id_quiz/questions (preguntas de un quiz)
+router.get('/:id_quiz/questions', quizController.getQuestionsByQuizId);
+
 // Create a new quiz (Admin only)
 router.post('/', authorizeRoles('admin'), quizController.createQuiz);
 

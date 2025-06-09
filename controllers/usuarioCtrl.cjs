@@ -100,7 +100,10 @@ exports.createUserProfile = async (req, res) => {
 
         // Optionally, update Firebase Auth custom claims with the role
         // This is important if you want to use `req.user.rol` directly in middleware
-        await admin.auth().setCustomUserClaims(uid, { rol: validatedData.rol });
+        await admin.auth().setCustomUserClaims(uid, { 
+            rol: validatedData.rol,
+            username: validatedData.username
+        });
 
 
         res.status(201).json({ message: 'Perfil de usuario creado exitosamente.', userId: uid, user: newUserProfile });
@@ -141,8 +144,51 @@ exports.updateUser = async (req, res) => {
             return res.status(404).json({ message: `Usuario con UID ${uid} no encontrado.` });
         }
 
+        // Guardar el rol actual antes de la actualización
+        const currentData = doc.data();
+        let claimsToUpdate = {};
+        let shouldUpdateClaims = false;
+
+        // Verificar cambios en username
+        if (validatedUpdates.username && validatedUpdates.username !== currentData.username) {
+            claimsToUpdate.username = validatedUpdates.username;
+            shouldUpdateClaims = true;
+        }
+
+        // Verificar cambios en rol (solo admin puede cambiar)
+        if (validatedUpdates.rol && req.user.rol === 'admin' && validatedUpdates.rol !== currentData.rol) {
+            claimsToUpdate.rol = validatedUpdates.rol;
+            shouldUpdateClaims = true;
+        }
+
         await userRef.update(validatedUpdates);
-        res.status(200).json({ message: 'Perfil de usuario actualizado exitosamente.' });
+
+        // Actualizar custom claims si el rol cambió
+        if (shouldUpdateClaims) {
+            try {
+                // Obtener claims existentes y mezclar con los nuevos
+                const user = await admin.auth().getUser(uid);
+                const currentClaims = user.customClaims || {};
+                
+                await admin.auth().setCustomUserClaims(uid, { 
+                    ...currentClaims,
+                    ...claimsToUpdate
+                });
+                
+                // Invalidar tokens existentes
+                await admin.auth().revokeRefreshTokens(uid);
+                
+                console.log(`Custom claims actualizados para usuario ${uid}:`, claimsToUpdate);
+            } catch (error) {
+                console.error(`Error al actualizar custom claims para usuario ${uid}:`, error);
+                // Continuar aunque falle la actualización de claims
+            }
+        }
+
+        res.status(200).json({ 
+            message: 'Perfil de usuario actualizado exitosamente.',
+            claimsUpdated: shouldUpdateClaims
+         });
     } catch (error) {
         if (error instanceof z.ZodError) {
             return res.status(400).json({ message: 'Datos de entrada inválidos.', errors: error.errors });

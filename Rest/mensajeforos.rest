@@ -4,8 +4,8 @@
 
 ### 1. Get All Messages for a Specific Forum (Authenticated User)
 # Replace YOUR_FORUM_ID_HERE with the ID of an existing forum.
-GET {{$dotenv BASE_URL}}/mensajesforos/forum/YOUR_FORUM_ID_HERE
-Authorization: Bearer {{$dotenv USER_TOKEN}}
+GET {{$dotenv BASE_URL}}/mensajesforos/forum/TDp7Ix5uSpt58oMOKL0u
+Authorization: Bearer {{$dotenv ADMIN_TOKEN}}
 
 ###
 

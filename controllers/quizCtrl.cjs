@@ -44,6 +44,58 @@ exports.getQuizById = async (req, res) => {
     }
 };
 
+// Get all questions for a specific quiz (Accessible to all authenticated users)
+exports.getQuestionsByQuizId = async (req, res) => {
+    try {
+        const { id_quiz } = req.params;
+
+        // 1. Get the quiz document to retrieve its question IDs
+        const quizRef = db.collection('quizzes').doc(id_quiz);
+        const quizDoc = await quizRef.get();
+
+        if (!quizDoc.exists) {
+            return res.status(404).json({ message: `Quiz con ID ${id_quiz} no encontrado.` });
+        }
+
+        const quizData = quizDoc.data();
+        const questionIds = quizData.id_preguntas;
+
+        // Handle case where a quiz might not have questions yet (though your schema ensures it does)
+        if (!questionIds || questionIds.length === 0) {
+            return res.status(200).json({ message: `El quiz con ID ${id_quiz} no tiene preguntas asignadas.`, questions: [] });
+        }
+
+        // 2. Fetch all question documents individually and in parallel
+        //    This is the most robust approach for >10 IDs
+        const questionPromises = questionIds.map(async (questionId) => {
+            const questionDoc = await db.collection('preguntas').doc(questionId).get();
+            if (questionDoc.exists) {
+                return {
+                    id_pregunta: questionDoc.id,
+                    ...questionDoc.data()
+                };
+            }
+            // If a question ID doesn't exist, you might choose to
+            // skip it, return null, or throw an error depending on your needs.
+            // For now, we'll just skip it (return undefined, which Promise.all filters out).
+            return undefined;
+        });
+
+        const questions = (await Promise.all(questionPromises)).filter(q => q !== undefined);
+
+        // Optional: If you need to ensure all questions were found, check `questions.length`
+        if (questions.length !== questionIds.length) {
+            console.warn(`Advertencia: Se esperaban ${questionIds.length} preguntas, pero se encontraron ${questions.length} para el quiz ${id_quiz}.`);
+            // You might choose to return a 404 or a warning here if a mismatch is critical.
+        }
+
+        res.status(200).json(questions);
+    } catch (error) {
+        console.error(`Error al obtener preguntas para el quiz con ID ${req.params.id_quiz}:`, error);
+        res.status(500).json({ message: 'Error interno del servidor.', error: error.message });
+    }
+};
+
 // Create a new quiz (Admin only)
 exports.createQuiz = async (req, res) => {
     try {

@@ -1,6 +1,6 @@
 ### 1. Get All Categories (Authenticated User)
 GET {{$dotenv BASE_URL}}/categorias
-Authorization: Bearer {{$dotenv USER_TOKEN}}
+Authorization: Bearer {{$dotenv ADMIN_TOKEN}}
 
 ###
 
