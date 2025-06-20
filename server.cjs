@@ -21,6 +21,7 @@ const estadisticaRoutes = require("./routes/estadisticaRoutes.cjs");
 const preguntaRoutes = require("./routes/preguntaRoutes.cjs");
 const quizRoutes = require("./routes/quizRoutes.cjs");
 const intentoQuizRoutes = require("./routes/intentoQuizRoutes.cjs");
+const expRoutes = require("./routes/expRoutes.cjs");
 
 app.use("/api/usuarios", usuarioRoutes);
 app.use("/api/categorias", categoriaRoutes);
@@ -31,6 +32,7 @@ app.use("/api/estadisticas", estadisticaRoutes);
 app.use("/api/preguntas", preguntaRoutes);
 app.use("/api/quizzes", quizRoutes);
 app.use("/api/intentosquizzes", intentoQuizRoutes);
+app.use("/api/exp", expRoutes);
 
 // Global error handler for Zod validation errors
 app.use((err, req, res, next) => {

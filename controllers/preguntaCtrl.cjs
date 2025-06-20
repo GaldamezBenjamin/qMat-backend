@@ -54,10 +54,11 @@ exports.getQuestionById = async (req, res) => {
 // Only accessible by admin users
 exports.createQuestion = async (req, res) => {
     try {
-        const { enunciado, dificultad, opciones, id_subcategoria } = req.body;
+        // Añadir 'explicacion' a la desestructuración del cuerpo de la petición
+        const { enunciado, dificultad, opciones, id_subcategoria, explicacion } = req.body;
 
-        // Validate request body with Zod
-        const validatedData = createQuestionSchema.parse({ enunciado, dificultad, opciones, id_subcategoria });
+        // Validar el cuerpo de la petición con Zod, incluyendo 'explicacion'
+        const validatedData = createQuestionSchema.parse({ enunciado, dificultad, opciones, id_subcategoria, explicacion });
 
         // Verify if id_subcategoria exists in the 'sub_categorias' collection
         const subCategoryRef = db.collection('sub_categorias').doc(validatedData.id_subcategoria);
@@ -68,6 +69,7 @@ exports.createQuestion = async (req, res) => {
         }
 
         const newQuestionRef = db.collection('preguntas').doc(); // Auto-generate ID
+        // Guardar todos los datos validados, incluyendo 'explicacion'
         await newQuestionRef.set(validatedData);
 
         res.status(201).json({ message: 'Pregunta creada exitosamente.', id_pregunta: newQuestionRef.id, question: validatedData });
@@ -85,9 +87,9 @@ exports.createQuestion = async (req, res) => {
 exports.updateQuestion = async (req, res) => {
     try {
         const { id_pregunta } = req.params;
-        const updates = req.body;
+        const updates = req.body; // 'updates' ya contiene todos los campos enviados, incluyendo 'explicacion' si se envía
 
-        // Validate request body with Zod
+        // Validar el cuerpo de la petición con Zod. updateQuestionSchema ya incluye 'explicacion' como opcional.
         const validatedUpdates = updateQuestionSchema.parse(updates);
 
         const questionRef = db.collection('preguntas').doc(id_pregunta);
@@ -106,6 +108,7 @@ exports.updateQuestion = async (req, res) => {
             }
         }
 
+        // Actualizar el documento con los datos validados. 'explicacion' se incluirá si está presente en 'validatedUpdates'.
         await questionRef.update(validatedUpdates);
         res.status(200).json({ message: 'Pregunta actualizada exitosamente.' });
     } catch (error) {

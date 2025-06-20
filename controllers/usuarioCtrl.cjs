@@ -62,6 +62,44 @@ exports.getUserByUid = async (req, res) => {
     }
 };
 
+// --- NEW METHOD: Get Public User Profile by UID ---
+// Accessible by any authenticated user
+exports.getPublicUserProfileByUid = async (req, res) => {
+    try {
+        const { uid } = req.params; // The UID of the user whose public profile is requested
+
+        // No authorization check for req.user.uid vs uid is needed here,
+        // as any authenticated user can view anyone else's public profile.
+        // However, we still need `req.user` to exist to ensure the requester is authenticated.
+        if (!req.user || !req.user.uid) {
+            return res.status(401).json({ message: 'No autenticado. Debes iniciar sesión para acceder a perfiles públicos.' });
+        }
+
+        const userRef = db.collection('usuarios').doc(uid);
+        const doc = await userRef.get();
+
+        if (!doc.exists) {
+            return res.status(404).json({ message: `Perfil público para UID ${uid} no encontrado.` });
+        }
+
+        const userData = doc.data();
+
+        // Extract only the public fields
+        const publicProfileData = {
+            id: doc.id,
+            username: userData.username,
+            exp: userData.exp, // Assuming 'exp' object contains 'actual' and 'anterior'
+            fecha_registro: userData.fecha_registro, // This is a Firestore Timestamp
+            // Add any other fields you consider public
+        };
+
+        res.status(200).json(publicProfileData);
+    } catch (error) {
+        console.error(`Error al obtener perfil público para UID ${req.params.uid}:`, error);
+        res.status(500).json({ message: 'Error interno del servidor.', error: error.message });
+    }
+};
+
 // Create a new user profile (after Firebase Auth registration)
 // This endpoint assumes the user has already registered via Firebase Auth
 // and their ID token provides the UID.
@@ -98,15 +136,17 @@ exports.createUserProfile = async (req, res) => {
 
         await userRef.set(newUserProfile);
 
-        // Optionally, update Firebase Auth custom claims with the role
-        // This is important if you want to use `req.user.rol` directly in middleware
-        await admin.auth().setCustomUserClaims(uid, { 
+        // Actualizar Firebase Auth custom claims con el rol y el nombre de usuario
+        // Esto es crucial para que el nombre de usuario aparezca inmediatamente en el frontend
+        // y el rol/suscriptor para las reglas de seguridad.
+        await admin.auth().setCustomUserClaims(uid, {
             rol: validatedData.rol,
-            username: validatedData.username
+            username: validatedData.username, // <-- AGREGADO: Nombre de usuario al custom claim
+            suscrito: false // <-- AGREGADO: Estado inicial de suscripción al custom claim
         });
 
 
-        res.status(201).json({ message: 'Perfil de usuario creado exitosamente.', userId: uid, user: newUserProfile });
+        res.status(201).json({ message: 'Perfil de usuario y claims creados exitosamente.', userId: uid, user: newUserProfile });
     } catch (error) {
         if (error instanceof z.ZodError) {
             return res.status(400).json({ message: 'Datos de entrada inválidos.', errors: error.errors });
@@ -146,7 +186,8 @@ exports.updateUser = async (req, res) => {
 
         // Guardar el rol actual antes de la actualización
         const currentData = doc.data();
-        let claimsToUpdate = {};
+        let claimsToUpdate = { ...req.user }; // Start with current claims from the authenticated user's token
+
         let shouldUpdateClaims = false;
 
         // Verificar cambios en username
@@ -166,18 +207,16 @@ exports.updateUser = async (req, res) => {
         // Actualizar custom claims si el rol cambió
         if (shouldUpdateClaims) {
             try {
-                // Obtener claims existentes y mezclar con los nuevos
-                const user = await admin.auth().getUser(uid);
-                const currentClaims = user.customClaims || {};
-                
-                await admin.auth().setCustomUserClaims(uid, { 
-                    ...currentClaims,
-                    ...claimsToUpdate
-                });
-                
-                // Invalidar tokens existentes
+                // Set the updated claims. Note: setCustomUserClaims overwrites existing claims,
+                // so ensure you merge all necessary claims (rol, username, suscrito)
+                // For simplicity here, we're relying on `claimsToUpdate` starting from `req.user` claims.
+                // In a more complex scenario, you'd fetch the user's *current* claims before setting.
+                // For 'suscrito', it's best handled in its dedicated updateSubscription method.
+                await admin.auth().setCustomUserClaims(uid, claimsToUpdate);
+
+                // Invalidar tokens existentes para forzar un nuevo token con los claims actualizados
                 await admin.auth().revokeRefreshTokens(uid);
-                
+
                 console.log(`Custom claims actualizados para usuario ${uid}:`, claimsToUpdate);
             } catch (error) {
                 console.error(`Error al actualizar custom claims para usuario ${uid}:`, error);
@@ -185,10 +224,10 @@ exports.updateUser = async (req, res) => {
             }
         }
 
-        res.status(200).json({ 
+        res.status(200).json({
             message: 'Perfil de usuario actualizado exitosamente.',
             claimsUpdated: shouldUpdateClaims
-         });
+        });
     } catch (error) {
         if (error instanceof z.ZodError) {
             return res.status(400).json({ message: 'Datos de entrada inválidos.', errors: error.errors });
@@ -258,6 +297,28 @@ exports.updateSubscription = async (req, res) => {
         };
 
         await userRef.update(subscriptionUpdates);
+
+        // --- AGREGADO: Actualizar custom claim 'suscrito' ---
+        try {
+            const user = await admin.auth().getUser(uid);
+            const currentClaims = user.customClaims || {};
+
+            // Merge existing claims with the new 'suscrito' status
+            await admin.auth().setCustomUserClaims(uid, {
+                ...currentClaims,
+                suscrito: validatedData.suscrito // Update the 'suscrito' custom claim
+            });
+
+            // Revoke refresh tokens to force the client to get a new ID token immediately
+            await admin.auth().revokeRefreshTokens(uid);
+
+            console.log(`Custom claim 'suscrito' actualizado para usuario ${uid}: ${validatedData.suscrito}`);
+        } catch (claimsError) {
+            console.error(`Error al actualizar custom claim 'suscrito' para usuario ${uid}:`, claimsError);
+            // Continuar con la respuesta, ya que la actualización de Firestore fue exitosa
+        }
+        // --- FIN AGREGADO ---
+
         res.status(200).json({ message: 'Estado de suscripción actualizado exitosamente.' });
     } catch (error) {
         if (error instanceof z.ZodError) {
@@ -301,6 +362,25 @@ exports.updateExperience = async (req, res) => {
             return res.status(400).json({ message: 'Datos de entrada inválidos.', errors: error.errors });
         }
         console.error(`Error al actualizar experiencia para usuario con UID ${req.params.uid}:`, error);
+        res.status(500).json({ message: 'Error interno del servidor.', error: error.message });
+    }
+};
+
+// Desactiva la cuenta de un usuario en Firebase Auth
+// Solo el propio usuario o un admin pueden desactivar la cuenta
+exports.disableUserAccount = async (req, res) => {
+    try {
+        const { uid } = req.params;
+
+        // Solo el propio usuario o un admin pueden desactivar la cuenta
+        if (req.user.uid !== uid && req.user.rol !== 'admin') {
+            return res.status(403).json({ message: 'Acceso denegado. No tienes permisos para desactivar esta cuenta.' });
+        }
+
+        await admin.auth().updateUser(uid, { disabled: true });
+        res.status(200).json({ message: 'Cuenta desactivada exitosamente.' });
+    } catch (error) {
+        console.error(`Error al desactivar cuenta para UID ${req.params.uid}:`, error);
         res.status(500).json({ message: 'Error interno del servidor.', error: error.message });
     }
 };

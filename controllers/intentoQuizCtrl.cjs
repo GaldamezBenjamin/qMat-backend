@@ -129,80 +129,149 @@ exports.startQuizAttempt = async (req, res) => {
     }
 };
 
-// Submit quiz results (User updates their own attempt, Admin can update any)
 // This endpoint would typically be called when the user finishes a quiz.
 // It populates 'respuestas_usuario' and sets 'fecha_fin'.
+// Submit quiz results for an attempt (User updates their own, Admin can update any)
 exports.submitQuizResults = async (req, res) => {
     try {
         const { id_intento } = req.params;
-        const { respuestas_usuario } = req.body;
+        const { respuestas_usuario } = req.body; // This now contains id_pregunta, respuesta_usuario, es_correcta
         const requester_uid = req.user.uid;
         const requester_rol = req.user.rol;
 
-        // Validate provided answers
+        // Authorization check
+        const attemptRef = db.collection('intentos_quiz').doc(id_intento);
+        const attemptDoc = await attemptRef.get();
+
+        if (!attemptDoc.exists) {
+            return res.status(404).json({ message: 'Intento de quiz no encontrado.' });
+        }
+
+        const attemptData = attemptDoc.data();
+
+        if (attemptData.uid !== requester_uid && requester_rol !== 'admin') {
+            return res.status(403).json({ message: 'Acceso denegado. No puedes enviar resultados de este intento.' });
+        }
+
+        // Validate the incoming answers
         const validatedResults = submitQuizResultsSchema.parse({ respuestas_usuario });
 
-        const attemptRef = db.collection('intentos_quiz').doc(id_intento);
-        const doc = await attemptRef.get();
+        // Fetch quiz details to get its question IDs
+        const quizRef = db.collection('quizzes').doc(attemptData.id_quiz);
+        const quizDoc = await quizRef.get();
 
-        if (!doc.exists) {
-            return res.status(404).json({ message: `Intento de quiz con ID ${id_intento} no encontrado.` });
+        if (!quizDoc.exists) {
+            return res.status(404).json({ message: 'Quiz asociado no encontrado.' });
+        }
+        const quizData = quizDoc.data();
+        const questionIdsInQuiz = quizData.id_preguntas; // Get the array of question IDs from the quiz
+
+        if (!questionIdsInQuiz || questionIdsInQuiz.length === 0) {
+            return res.status(400).json({ message: 'El quiz no tiene preguntas asignadas.' });
         }
 
-        const attemptData = doc.data();
+        // Fetch all question documents to get their subcategory IDs
+        const questionPromises = questionIdsInQuiz.map(id => db.collection('preguntas').doc(id).get());
+        const questionDocs = await Promise.all(questionPromises);
 
-        // Authorization check
-        if (attemptData.uid !== requester_uid && requester_rol !== 'admin') {
-            return res.status(403).json({ message: 'Acceso denegado. Solo puedes enviar resultados para tus propios intentos de quiz.' });
-        }
-
-        // Prevent resubmission if already finished
-        if (attemptData.fecha_fin) {
-            return res.status(400).json({ message: 'Este intento de quiz ya ha sido finalizado.' });
-        }
-
-        // OPTIONAL BUT HIGHLY RECOMMENDED: Server-side scoring and validation
-        // Fetch original questions to verify correct answers and `es_correcta`
-        const questionIds = validatedResults.respuestas_usuario.map(r => r.id_pregunta);
-        const uniqueQuestionIds = [...new Set(questionIds)]; // Avoid fetching duplicates
-
-        const questionsSnapshot = await db.collection('preguntas')
-            .where(admin.firestore.FieldPath.documentId(), 'in', uniqueQuestionIds)
-            .get();
-
-        if (questionsSnapshot.empty) {
-             return res.status(400).json({ message: 'Una o más preguntas en las respuestas proporcionadas no existen.' });
-        }
-
-        const questionsMap = new Map();
-        questionsSnapshot.forEach(qDoc => {
-            questionsMap.set(qDoc.id, qDoc.data());
-        });
-
-        // Re-evaluate 'es_correcta' on the server side to prevent client-side tampering
-        const verifiedAnswers = validatedResults.respuestas_usuario.map(userAnswer => {
-            const question = questionsMap.get(userAnswer.id_pregunta);
-            if (!question) {
-                // This scenario should ideally be caught by the previous check or handled as an error
-                console.warn(`Question ${userAnswer.id_pregunta} not found during scoring.`);
-                return { ...userAnswer, es_correcta: false }; // Default to incorrect if question not found
+        const quizQuestionsMap = new Map(); // Map: question_id -> subcategory_id
+        questionDocs.forEach(doc => {
+            if (doc.exists && doc.data().id_subcategoria) {
+                quizQuestionsMap.set(doc.id, doc.data().id_subcategoria);
             }
-            const correctOptionKey = question.opciones.correcta; // 'a', 'b', 'c', or 'd'
-            const isCorrect = userAnswer.respuesta_usuario === question.opciones[correctOptionKey];
-            return {
-                id_pregunta: userAnswer.id_pregunta,
-                respuesta_usuario: userAnswer.respuesta_usuario,
-                es_correcta: isCorrect
-            };
         });
 
-        // Update the attempt with answers and end time
+        // 1. Calculate duration for the current attempt
+        const fechaInicioMs = attemptData.fecha_inicio.toDate().getTime();
+        const fechaFinTimestamp = admin.firestore.Timestamp.now();
+        const fechaFinMs = fechaFinTimestamp.toDate().getTime();
+        const durationSeconds = (fechaFinMs - fechaInicioMs) / 1000;
+
+        // 2. Update the quiz attempt document with results
         await attemptRef.update({
-            respuestas_usuario: verifiedAnswers,
-            fecha_fin: admin.firestore.Timestamp.now()
+            respuestas_usuario: validatedResults.respuestas_usuario,
+            fecha_fin: fechaFinTimestamp,
+            duracion_segundos: durationSeconds
         });
 
-        res.status(200).json({ message: 'Resultados del quiz enviados exitosamente.', verified_answers: verifiedAnswers });
+        // 3. Prepare data for general user statistics update
+        const userStatsRef = db.collection('estadisticas').doc(requester_uid);
+        const userStatsDoc = await userStatsRef.get();
+
+        let currentTotalTiempo = durationSeconds;
+        let currentQuizzesCompletados = 1; // Increment by 1 for this quiz completion
+
+        // Initialize subcategory tallies for this quiz attempt
+        const subCategoryTally = {}; // { 'subcat_id': { correctas: N, incorrectas: M } }
+
+        validatedResults.respuestas_usuario.forEach(answer => {
+            const subCategoryId = quizQuestionsMap.get(answer.id_pregunta);
+            if (subCategoryId) {
+                if (!subCategoryTally[subCategoryId]) {
+                    subCategoryTally[subCategoryId] = { correctas: 0, incorrectas: 0 };
+                }
+                if (answer.es_correcta) {
+                    subCategoryTally[subCategoryId].correctas++;
+                } else {
+                    subCategoryTally[subCategoryId].incorrectas++;
+                }
+            } else {
+                console.warn(`Subcategoría no encontrada para la pregunta ID: ${answer.id_pregunta}`);
+            }
+        });
+
+        if (userStatsDoc.exists) {
+            const statsData = userStatsDoc.data();
+            currentTotalTiempo += (statsData.total_tiempo || 0);
+            currentQuizzesCompletados += (statsData.quizzes_completados || 0); // Add previous completed quizzes
+        }
+
+        const newTiempoPromedio = currentTotalTiempo / currentQuizzesCompletados;
+
+        // Use a Firestore batch for atomic updates
+        const batch = db.batch();
+
+        // Update main statistics fields
+        batch.set(userStatsRef, {
+            total_tiempo: currentTotalTiempo,
+            quizzes_completados: currentQuizzesCompletados,
+            tiempo_promedio: newTiempoPromedio,
+            ultima_actualizacion: admin.firestore.Timestamp.now()
+        }, { merge: true });
+
+        // Update `respuestas_por_categoria` for each subcategory atomically
+        let existingRespuestasPorCategoria = userStatsDoc.exists && Array.isArray(userStatsDoc.data().respuestas_por_categoria)
+            ? [...userStatsDoc.data().respuestas_por_categoria] // Create a mutable copy
+            : [];
+
+        for (const subcatId in subCategoryTally) {
+            const tally = subCategoryTally[subcatId];
+            const existingIndex = existingRespuestasPorCategoria.findIndex(
+                (item) => item.id_subcategoria === subcatId
+            );
+
+            if (existingIndex > -1) {
+                existingRespuestasPorCategoria[existingIndex].correctas =
+                    (existingRespuestasPorCategoria[existingIndex].correctas || 0) + tally.correctas;
+                existingRespuestasPorCategoria[existingIndex].incorrectas =
+                    (existingRespuestasPorCategoria[existingIndex].incorrectas || 0) + tally.incorrectas;
+            } else {
+                existingRespuestasPorCategoria.push({
+                    id_subcategoria: subcatId,
+                    correctas: tally.correctas,
+                    incorrectas: tally.incorrectas,
+                });
+            }
+        }
+
+        batch.update(userStatsRef, {
+            respuestas_por_categoria: existingRespuestasPorCategoria
+        });
+
+        await batch.commit();
+
+        res.status(200).json({ message: 'Resultados del quiz y estadísticas actualizadas exitosamente.' });
+
     } catch (error) {
         if (error instanceof z.ZodError) {
             return res.status(400).json({ message: 'Datos de entrada inválidos.', errors: error.errors });

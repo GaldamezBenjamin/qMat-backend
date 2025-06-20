@@ -13,6 +13,10 @@ router.get('/', authorizeRoles('admin'), usuario.getAllUsers);
 // Users can view their own profile, admins can view any profile
 router.get('/:uid', usuario.getUserByUid); // Logic for self/admin check is in controller
 
+// Get an user's profile
+// This endpoint is typically used to fetch the profile of an user
+router.get('/:uid/profile', usuario.getPublicUserProfileByUid);
+
 // Create a new user profile (after Firebase Auth registration)
 // This endpoint is typically called by a newly registered user to set up their profile.
 router.post('/profile', usuario.createUserProfile);
@@ -31,5 +35,8 @@ router.patch('/:uid/subscription', usuario.updateSubscription); // Logic for sel
 // Update experience points
 // Users can update their own experience, admins can update any
 router.patch('/:uid/experience', usuario.updateExperience); // Logic for self/admin check is in controller
+
+// Desactivar cuenta de usuario (propio usuario o admin)
+router.patch('/:uid/disable', usuario.disableUserAccount); // Logic for self/admin check is in controller
 
 module.exports = router;

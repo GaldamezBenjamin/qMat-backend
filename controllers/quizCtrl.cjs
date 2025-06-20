@@ -2,6 +2,51 @@ const { db } = require('../config/firebase.cjs');
 const { createQuizSchema, updateQuizSchema } = require('../schemas/quizSchemas.cjs');
 const { z } = require('zod');
 
+// --- Función auxiliar para calcular la subcategoría principal de un quiz ---
+async function calculateMainSubcategory(questionIds) {
+    if (!questionIds || questionIds.length === 0) {
+        return null; // No hay preguntas, no hay subcategoría principal
+    }
+
+    const subcategoryCounts = {};
+    let maxCount = 0;
+    let mainSubcategoryId = null;
+
+    // Fetch all relevant subcategories efficiently (if questions are many, optimize this batch)
+    // For simplicity, fetching all questions first, then their subcategories.
+    const questionPromises = questionIds.map(id => db.collection('preguntas').doc(id).get());
+    const questionDocs = await Promise.all(questionPromises);
+
+    const subcategoryIds = new Set(); // Para recolectar solo IDs únicos de subcategorías
+    questionDocs.forEach(doc => {
+        if (doc.exists && doc.data().id_subcategoria) {
+            const subId = doc.data().id_subcategoria;
+            subcategoryCounts[subId] = (subcategoryCounts[subId] || 0) + 1;
+            subcategoryIds.add(subId); // Añadir al set de IDs únicas
+
+            if (subcategoryCounts[subId] > maxCount) {
+                maxCount = subcategoryCounts[subId];
+                mainSubcategoryId = subId;
+            }
+        }
+    });
+
+    if (!mainSubcategoryId) {
+        return null; // No se encontró ninguna subcategoría válida en las preguntas
+    }
+
+    // Obtener el nombre de la subcategoría más común
+    const mainSubcategoryDoc = await db.collection('sub_categorias').doc(mainSubcategoryId).get();
+    if (mainSubcategoryDoc.exists) {
+        return {
+            id: mainSubcategoryDoc.id,
+            nombre: mainSubcategoryDoc.data().nombre
+        };
+    }
+
+    return null; // No se encontró el documento de la subcategoría principal
+}
+
 // Get all quizzes (Accessible to all authenticated users)
 exports.getAllQuizzes = async (req, res) => {
     try {
@@ -118,10 +163,15 @@ exports.createQuiz = async (req, res) => {
         });
         await Promise.all(questionChecks);
 
-        const newQuizRef = db.collection('quizzes').doc(); // Auto-generate ID
-        await newQuizRef.set(validatedData);
+        const mainSubcategory = await calculateMainSubcategory(validatedData.id_preguntas);
 
-        res.status(201).json({ message: 'Quiz creado exitosamente.', id_quiz: newQuizRef.id, quiz: validatedData });
+        const newQuizRef = db.collection('quizzes').doc();
+        await newQuizRef.set({
+            ...validatedData,
+            main_subcategory: mainSubcategory
+        });
+
+        res.status(201).json({ message: 'Quiz creado exitosamente.', id_quiz: newQuizRef.id, quiz: { ...validatedData, main_subcategory: mainSubcategory } });
     } catch (error) {
         if (error instanceof z.ZodError) {
             return res.status(400).json({ message: 'Datos de entrada inválidos.', errors: error.errors });
@@ -151,17 +201,19 @@ exports.updateQuiz = async (req, res) => {
             return res.status(404).json({ message: `Quiz con ID ${id_quiz} no encontrado.` });
         }
 
-        // If id_preguntas or cantidad_preguntas are being updated, perform checks
-        if (validatedUpdates.id_preguntas) {
-            // Ensure cantidad_preguntas matches id_preguntas array length if both are provided
+        const currentQuizData = doc.data(); // Obtener los datos actuales del quiz
+
+        let newMainSubcategory = currentQuizData.main_subcategory || null; // Mantener la existente por defecto
+        let shouldRecalculateSubcategory = false;
+
+        // Si id_preguntas se está actualizando, necesitamos recalcular la subcategoría principal
+        if (validatedUpdates.id_preguntas && validatedUpdates.id_preguntas.length > 0) {
             if (validatedUpdates.cantidad_preguntas && validatedUpdates.cantidad_preguntas !== validatedUpdates.id_preguntas.length) {
                 return res.status(400).json({ message: 'La cantidad de preguntas debe coincidir con el número de IDs de preguntas proporcionados.' });
-            } else if (!validatedUpdates.cantidad_preguntas && validatedUpdates.id_preguntas.length !== doc.data().cantidad_preguntas) {
-                // If only id_preguntas is updated, check against existing cantidad_preguntas
+            } else if (!validatedUpdates.cantidad_preguntas && validatedUpdates.id_preguntas.length !== currentQuizData.cantidad_preguntas) {
                  return res.status(400).json({ message: 'El número de IDs de preguntas no coincide con la cantidad de preguntas existente en el quiz.' });
             }
 
-            // Verify if all updated question IDs exist
             const questionChecks = validatedUpdates.id_preguntas.map(async (questionId) => {
                 const questionDoc = await db.collection('preguntas').doc(questionId).get();
                 if (!questionDoc.exists) {
@@ -169,20 +221,29 @@ exports.updateQuiz = async (req, res) => {
                 }
             });
             await Promise.all(questionChecks);
-        } else if (validatedUpdates.cantidad_preguntas && validatedUpdates.cantidad_preguntas !== doc.data().id_preguntas.length) {
-            // If only cantidad_preguntas is updated, it must match the current id_preguntas length
+
+            shouldRecalculateSubcategory = true; // Indicar que hay que recalcular
+        } else if (validatedUpdates.cantidad_preguntas && validatedUpdates.cantidad_preguntas !== currentQuizData.id_preguntas.length) {
             return res.status(400).json({ message: 'La cantidad de preguntas actualizada debe coincidir con el número de IDs de preguntas existentes.' });
         }
 
+        // Si se debe recalcular, hazlo
+        if (shouldRecalculateSubcategory) {
+            newMainSubcategory = await calculateMainSubcategory(validatedUpdates.id_preguntas || currentQuizData.id_preguntas);
+        }
 
-        await quizRef.update(validatedUpdates);
+        // Aplicar la actualización al quiz, incluyendo la nueva subcategoría principal
+        await quizRef.update({
+            ...validatedUpdates,
+            main_subcategory: newMainSubcategory // Actualizar con la nueva (o misma) subcategoría principal
+        });
+
         res.status(200).json({ message: 'Quiz actualizado exitosamente.' });
     } catch (error) {
         if (error instanceof z.ZodError) {
             return res.status(400).json({ message: 'Datos de entrada inválidos.', errors: error.errors });
         }
         console.error(`Error al actualizar quiz con ID ${req.params.id_quiz}:`, error);
-        // Custom error for non-existent questions
         if (error.message.includes('La pregunta con ID')) {
             return res.status(400).json({ message: error.message });
         }
