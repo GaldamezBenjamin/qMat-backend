@@ -22,6 +22,9 @@ const preguntaRoutes = require("./routes/preguntaRoutes.cjs");
 const quizRoutes = require("./routes/quizRoutes.cjs");
 const intentoQuizRoutes = require("./routes/intentoQuizRoutes.cjs");
 const expRoutes = require("./routes/expRoutes.cjs");
+const paypalRoutes = require("./routes/paypalRoutes.cjs");
+const pdfRoutes = require("./routes/pdfRoutes.cjs");
+const bulkRoutes = require("./routes/bulkRoutes.cjs");
 
 app.use("/api/usuarios", usuarioRoutes);
 app.use("/api/categorias", categoriaRoutes);
@@ -33,6 +36,9 @@ app.use("/api/preguntas", preguntaRoutes);
 app.use("/api/quizzes", quizRoutes);
 app.use("/api/intentosquizzes", intentoQuizRoutes);
 app.use("/api/exp", expRoutes);
+app.use("/api/paypal", paypalRoutes);
+app.use("/api/pdf", pdfRoutes);
+app.use("/api/bulk", bulkRoutes);
 
 // Global error handler for Zod validation errors
 app.use((err, req, res, next) => {

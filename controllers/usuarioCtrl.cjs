@@ -105,10 +105,9 @@ exports.getPublicUserProfileByUid = async (req, res) => {
 // and their ID token provides the UID.
 exports.createUserProfile = async (req, res) => {
     try {
-        const uid = req.user.uid; // Get UID from the authenticated token
-        const { username, email, rol } = req.body; // Password is not here
+        const uid = req.user.uid;
+        const { username, email, rol } = req.body;
 
-        // Validate request body with Zod
         const validatedData = createUserSchema.parse({ username, email, rol });
 
         const userRef = db.collection('usuarios').doc(uid);
@@ -136,17 +135,9 @@ exports.createUserProfile = async (req, res) => {
 
         await userRef.set(newUserProfile);
 
-        // Actualizar Firebase Auth custom claims con el rol y el nombre de usuario
-        // Esto es crucial para que el nombre de usuario aparezca inmediatamente en el frontend
-        // y el rol/suscriptor para las reglas de seguridad.
-        await admin.auth().setCustomUserClaims(uid, {
-            rol: validatedData.rol,
-            username: validatedData.username, // <-- AGREGADO: Nombre de usuario al custom claim
-            suscrito: false // <-- AGREGADO: Estado inicial de suscripción al custom claim
-        });
+        // Ya NO se actualizan custom claims aquí
 
-
-        res.status(201).json({ message: 'Perfil de usuario y claims creados exitosamente.', userId: uid, user: newUserProfile });
+        res.status(201).json({ message: 'Perfil de usuario creado exitosamente.', userId: uid, user: newUserProfile });
     } catch (error) {
         if (error instanceof z.ZodError) {
             return res.status(400).json({ message: 'Datos de entrada inválidos.', errors: error.errors });
@@ -162,16 +153,12 @@ exports.updateUser = async (req, res) => {
         const { uid } = req.params;
         const updates = req.body;
 
-        // A user can only update their own profile, unless they are an admin
         if (req.user.uid !== uid && req.user.rol !== 'admin') {
             return res.status(403).json({ message: 'Acceso denegado. No tienes permisos para actualizar este perfil.' });
         }
 
-        // Validate request body with Zod
         const validatedUpdates = updateUserSchema.parse(updates);
 
-        // Admins can change roles, but regular users cannot.
-        // If a non-admin tries to change 'rol', remove it from updates.
         if (req.user.rol !== 'admin' && validatedUpdates.rol) {
             delete validatedUpdates.rol;
             console.warn(`Usuario ${req.user.uid} intentó cambiar el rol de ${uid}. Acción denegada.`);
@@ -184,49 +171,12 @@ exports.updateUser = async (req, res) => {
             return res.status(404).json({ message: `Usuario con UID ${uid} no encontrado.` });
         }
 
-        // Guardar el rol actual antes de la actualización
-        const currentData = doc.data();
-        let claimsToUpdate = { ...req.user }; // Start with current claims from the authenticated user's token
-
-        let shouldUpdateClaims = false;
-
-        // Verificar cambios en username
-        if (validatedUpdates.username && validatedUpdates.username !== currentData.username) {
-            claimsToUpdate.username = validatedUpdates.username;
-            shouldUpdateClaims = true;
-        }
-
-        // Verificar cambios en rol (solo admin puede cambiar)
-        if (validatedUpdates.rol && req.user.rol === 'admin' && validatedUpdates.rol !== currentData.rol) {
-            claimsToUpdate.rol = validatedUpdates.rol;
-            shouldUpdateClaims = true;
-        }
-
         await userRef.update(validatedUpdates);
 
-        // Actualizar custom claims si el rol cambió
-        if (shouldUpdateClaims) {
-            try {
-                // Set the updated claims. Note: setCustomUserClaims overwrites existing claims,
-                // so ensure you merge all necessary claims (rol, username, suscrito)
-                // For simplicity here, we're relying on `claimsToUpdate` starting from `req.user` claims.
-                // In a more complex scenario, you'd fetch the user's *current* claims before setting.
-                // For 'suscrito', it's best handled in its dedicated updateSubscription method.
-                await admin.auth().setCustomUserClaims(uid, claimsToUpdate);
-
-                // Invalidar tokens existentes para forzar un nuevo token con los claims actualizados
-                await admin.auth().revokeRefreshTokens(uid);
-
-                console.log(`Custom claims actualizados para usuario ${uid}:`, claimsToUpdate);
-            } catch (error) {
-                console.error(`Error al actualizar custom claims para usuario ${uid}:`, error);
-                // Continuar aunque falle la actualización de claims
-            }
-        }
+        // Ya NO se actualizan custom claims aquí
 
         res.status(200).json({
-            message: 'Perfil de usuario actualizado exitosamente.',
-            claimsUpdated: shouldUpdateClaims
+            message: 'Perfil de usuario actualizado exitosamente.'
         });
     } catch (error) {
         if (error instanceof z.ZodError) {
@@ -275,12 +225,10 @@ exports.updateSubscription = async (req, res) => {
         const { uid } = req.params;
         const { suscrito, fecha_inicio, fecha_fin } = req.body;
 
-        // A user can only update their own subscription, unless they are an admin
         if (req.user.uid !== uid && req.user.rol !== 'admin') {
             return res.status(403).json({ message: 'Acceso denegado. No tienes permisos para actualizar esta suscripción.' });
         }
 
-        // Validate request body with Zod
         const validatedData = updateSubscriptionSchema.parse({ suscrito, fecha_inicio, fecha_fin });
 
         const userRef = db.collection('usuarios').doc(uid);
@@ -298,26 +246,7 @@ exports.updateSubscription = async (req, res) => {
 
         await userRef.update(subscriptionUpdates);
 
-        // --- AGREGADO: Actualizar custom claim 'suscrito' ---
-        try {
-            const user = await admin.auth().getUser(uid);
-            const currentClaims = user.customClaims || {};
-
-            // Merge existing claims with the new 'suscrito' status
-            await admin.auth().setCustomUserClaims(uid, {
-                ...currentClaims,
-                suscrito: validatedData.suscrito // Update the 'suscrito' custom claim
-            });
-
-            // Revoke refresh tokens to force the client to get a new ID token immediately
-            await admin.auth().revokeRefreshTokens(uid);
-
-            console.log(`Custom claim 'suscrito' actualizado para usuario ${uid}: ${validatedData.suscrito}`);
-        } catch (claimsError) {
-            console.error(`Error al actualizar custom claim 'suscrito' para usuario ${uid}:`, claimsError);
-            // Continuar con la respuesta, ya que la actualización de Firestore fue exitosa
-        }
-        // --- FIN AGREGADO ---
+        // Ya NO se actualizan custom claims aquí
 
         res.status(200).json({ message: 'Estado de suscripción actualizado exitosamente.' });
     } catch (error) {

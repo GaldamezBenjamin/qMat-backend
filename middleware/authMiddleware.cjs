@@ -1,5 +1,6 @@
-const { admin } = require('../config/firebase.cjs');
+const { admin, db } = require('../config/firebase.cjs');
 
+// Middleware para verificar el token de Firebase
 const verifyToken = async (req, res, next) => {
     const authHeader = req.headers.authorization;
 
@@ -22,25 +23,31 @@ const verifyToken = async (req, res, next) => {
     }
 };
 
-// Middleware for role-based access control
+// Middleware para control de acceso basado en roles (rol desde Firestore)
 const authorizeRoles = (...allowedRoles) => {
-    return (req, res, next) => {
-        if (!req.user || !req.user.rol) { // Assuming 'rol' is stored in custom claims or fetched later
-            // If 'rol' is not in custom claims, you'll need to fetch it from Firestore here
-            // For simplicity, we assume 'rol' is part of custom claims or attached during user creation
-            return res.status(403).json({ message: 'Acceso denegado. Rol de usuario no definido.' });
+    return async (req, res, next) => {
+        if (!req.user || !req.user.uid) {
+            return res.status(403).json({ message: 'Acceso denegado. Usuario no autenticado.' });
         }
 
-        // For this example, we assume 'rol' is a custom claim set in Firebase Auth
-        // If not, you'd fetch the user document here:
-        // const userDoc = await db.collection('usuarios').doc(req.user.uid).get();
-        // const userRol = userDoc.data()?.rol;
-        const userRol = req.user.rol; // Assuming 'rol' is directly in custom claims
-
-        if (!allowedRoles.includes(userRol)) {
-            return res.status(403).json({ message: `Acceso denegado. Se requiere uno de los siguientes roles: ${allowedRoles.join(', ')}.` });
+        try {
+            // Buscar el rol del usuario en la colección 'usuarios'
+            const userDoc = await db.collection('usuarios').doc(req.user.uid).get();
+            if (!userDoc.exists) {
+                return res.status(403).json({ message: 'Acceso denegado. Usuario no encontrado en la base de datos.' });
+            }
+            const userRol = userDoc.data().rol;
+            if (!userRol) {
+                return res.status(403).json({ message: 'Acceso denegado. Rol de usuario no definido.' });
+            }
+            if (!allowedRoles.includes(userRol)) {
+                return res.status(403).json({ message: `Acceso denegado. Se requiere uno de los siguientes roles: ${allowedRoles.join(', ')}.` });
+            }
+            next();
+        } catch (error) {
+            console.error('Error al verificar rol de usuario:', error);
+            res.status(500).json({ message: 'Error interno al verificar el rol de usuario.', error: error.message });
         }
-        next();
     };
 };
 

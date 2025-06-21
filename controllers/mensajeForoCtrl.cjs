@@ -120,6 +120,9 @@ exports.updateMessage = async (req, res) => {
             return res.status(403).json({ message: 'Acceso denegado. Solo el autor o un administrador pueden actualizar este mensaje.' });
         }
 
+        // Añadir campo fecha_edicion
+        validatedUpdates.fecha_edicion = admin.firestore.Timestamp.now();
+
         await messageRef.update(validatedUpdates);
         res.status(200).json({ message: 'Mensaje actualizado exitosamente.' });
     } catch (error) {
