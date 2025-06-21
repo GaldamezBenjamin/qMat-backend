@@ -178,6 +178,37 @@ function extractJsonObjectSubstring(text) {
 }
 
 /**
+ * Función auxiliar para extraer una subcadena JSON (asumiendo un array JSON) de un texto.
+ * Intenta encontrar el primer '[' y el último ']' para parsear,
+ * y luego limpia las cercas de Markdown si están presentes.
+ *
+ * @param {string} text - El texto completo devuelto por la IA.
+ * @returns {string|null} La subcadena JSON limpia o null si no se encuentra un JSON válido.
+ */
+function extractJsonArraySubstring(text) {
+  const firstBracket = text.indexOf('[');
+  const lastBracket = text.lastIndexOf(']');
+
+  if (firstBracket === -1 || lastBracket === -1 || lastBracket < firstBracket) {
+    return null;
+  }
+
+  let jsonSubstring = text.substring(firstBracket, lastBracket + 1);
+
+  // Limpiar cercas de Markdown si existen
+  if (jsonSubstring.startsWith('```json')) {
+    jsonSubstring = jsonSubstring.substring(7);
+  } else if (jsonSubstring.startsWith('```')) {
+    jsonSubstring = jsonSubstring.substring(3);
+  }
+  if (jsonSubstring.endsWith('```')) {
+    jsonSubstring = jsonSubstring.slice(0, -3);
+  }
+
+  return jsonSubstring.trim();
+}
+
+/**
  * Función auxiliar para generar una única pregunta usando la IA.
  * Construye el prompt con los detalles del quiz y el formato de salida esperado.
  *
@@ -185,13 +216,14 @@ function extractJsonObjectSubstring(text) {
  * @param {string} subcategoria - La subcategoría a la que pertenece el quiz.
  * @param {string} idSubcategoria - El ID de la subcategoría.
  * @param {string} dificultad - La dificultad deseada para la pregunta.
+ * @param {number} cantidad - La cantidad de preguntas a generar.
  * @returns {Promise<object>} Una promesa que resuelve con el objeto de la pregunta generada o rechaza con un error.
  */
-async function generarUnaPregunta(quizTitulo, subcategoria, idSubcategoria, dificultad) {
-  const prompt = `Genera una pregunta de quiz sobre el tema "${quizTitulo}" que pertenece a la subcategoría de MATEMÁTICAS "${subcategoria}".
-La pregunta debe tener una dificultad de **${dificultad}**.
+async function generarUnaPregunta(quizTitulo, subcategoria, idSubcategoria, dificultad, cantidad = 1) {
+  const prompt = `Genera ${cantidad} preguntas de quiz sobre el tema "${quizTitulo}" que pertenece a la subcategoría de MATEMÁTICAS "${subcategoria}".
+Cada pregunta debe tener una dificultad de **${dificultad}**.
 
-El formato de salida debe ser un objeto JSON estricto con las siguientes propiedades:
+El formato de salida debe ser un array JSON de objetos, cada uno con las siguientes propiedades:
 - **enunciado**: (string) El texto de la pregunta.
 - **dificultad**: (string) La dificultad de la pregunta (debe ser "${dificultad}").
 - **opciones**: (object) Un objeto con 4 opciones (a, b, c, d) y una propiedad 'correcta' indicando la letra de la opción correcta.
@@ -202,21 +234,23 @@ El formato de salida debe ser un objeto JSON estricto con las siguientes propied
   - correcta: (string) La letra de la opción correcta (ej. "a").
 - **explicacion**: (string) Una explicación concisa (máximo 2-3 oraciones) de por qué la opción correcta es la respuesta.
 
-Asegúrate de que la respuesta sea solo el objeto JSON, sin texto adicional antes o después.
+Asegúrate de que la respuesta sea solo el array JSON, sin texto adicional antes o después.
 
 Ejemplo de estructura de salida:
-{
-  "enunciado": "¿Cuál es la derivada de la función f(x) = x^2?",
-  "dificultad": "baja",
-  "opciones": {
-    "a": "2x",
-    "b": "x",
-    "c": "x^3/3",
-    "d": "2",
-    "correcta": "a"
-  },
-  "explicacion": "La derivada de x^n es n*x^(n-1). Para x^2, n es 2, por lo que la derivada es 2x."
-}
+[
+  {
+    "enunciado": "¿Cuál es la derivada de la función f(x) = x^2?",
+    "dificultad": "baja",
+    "opciones": {
+      "a": "2x",
+      "b": "x",
+      "c": "x^3/3",
+      "d": "2",
+      "correcta": "a"
+    },
+    "explicacion": "La derivada de x^n es n*x^(n-1). Para x^2, n es 2, por lo que la derivada es 2x."
+  }
+]
 `;
 
   try {
@@ -224,29 +258,31 @@ Ejemplo de estructura de salida:
     const response = await result.response;
     let rawResponseText = response.text().trim();
 
-    const cleanedJsonString = extractJsonObjectSubstring(rawResponseText);
+    const cleanedJsonString = extractJsonArraySubstring(rawResponseText);
 
     if (cleanedJsonString === null) {
-      console.error(`No se pudo encontrar un objeto JSON válido en la respuesta de la IA. Respuesta original: ${rawResponseText}`);
-      throw new Error('La IA no devolvió un objeto JSON válido o la estructura no se pudo extraer.');
+      console.error(`No se pudo encontrar un array JSON válido en la respuesta de la IA. Respuesta original: ${rawResponseText}`);
+      throw new Error('La IA no devolvió un array JSON válido o la estructura no se pudo extraer.');
     }
 
-    let preguntaParseada;
+    let preguntasParseadas;
     try {
-      preguntaParseada = JSON.parse(cleanedJsonString);
+      preguntasParseadas = JSON.parse(cleanedJsonString);
     } catch (jsonParseError) {
       console.error(`Error al parsear el JSON extraído:`, jsonParseError);
       throw new Error(`La IA devolvió un formato JSON inválido: ${jsonParseError.message}. Contenido: ${cleanedJsonString}`);
     }
 
-    if (!preguntaParseada || !preguntaParseada.enunciado || !preguntaParseada.opciones || !preguntaParseada.explicacion) {
-      console.error('La estructura de la pregunta generada por la IA es inválida:', preguntaParseada);
-      throw new Error('La IA generó una pregunta con una estructura JSON inesperada.');
+    if (!Array.isArray(preguntasParseadas) || preguntasParseadas.length === 0) {
+      throw new Error('La IA no generó preguntas válidas.');
     }
 
-    preguntaParseada.id_subcategoria = idSubcategoria;
+    // Adjuntar la id_subcategoria a cada pregunta
+    preguntasParseadas.forEach(p => {
+      p.id_subcategoria = idSubcategoria;
+    });
 
-    return preguntaParseada;
+    return preguntasParseadas;
   } catch (error) {
     console.error(`Error en generarUnaPregunta para ${quizTitulo}:`, error.message);
     throw error;
@@ -297,39 +333,43 @@ exports.generateQuizQuestions = async (req, res) => {
     const { subcategoria, id_subcategoria } = quizInfo;
 
     // Calcular la cantidad de preguntas a generar para este quiz
-    // Genera un número aleatorio entre cantidad_minima y cantidad_maxima (inclusive)
     const numQuestionsToGenerate = Math.floor(Math.random() * (cantidad_maxima - cantidad_minima + 1)) + cantidad_minima;
+
+    // Seleccionar una dificultad aleatoria para cada pregunta (puedes mejorar esto si quieres variedad)
+    const dificultadSeleccionada = dificultades[Math.floor(Math.random() * dificultades.length)];
 
     console.log(`Generando ${numQuestionsToGenerate} preguntas para: "${quizTitulo}" (Subcategoría: "${subcategoria}")`);
 
-    for (let i = 0; i < numQuestionsToGenerate; i++) {
-      // Seleccionar una dificultad aleatoria para cada pregunta
-      const dificultadSeleccionada = dificultades[Math.floor(Math.random() * dificultades.length)];
+    try {
+      // Llama a la IA para generar todas las preguntas de una vez
+      const preguntasArray = await generarUnaPregunta(
+        quizTitulo,
+        subcategoria,
+        id_subcategoria,
+        dificultadSeleccionada,
+        numQuestionsToGenerate
+      );
 
-      console.log(`  > Solicitando pregunta ${i + 1}/${numQuestionsToGenerate} con dificultad: "${dificultadSeleccionada}"`);
-
-      try {
-        const nuevaPregunta = await generarUnaPregunta(quizTitulo, subcategoria, id_subcategoria, dificultadSeleccionada);
+      preguntasArray.forEach((pregunta) => {
         generatedQuestions.push({
           status: 'success',
-          quizTitulo: quizTitulo, // Para que el frontend sepa a qué quiz pertenece
-          data: nuevaPregunta
-        });
-        console.log(`  > Pregunta ${i + 1} para "${quizTitulo}" generada exitosamente.`);
-
-        // Pequeño retraso para evitar sobrecargar la API y ser más amigables con las cuotas.
-        await new Promise(resolve => setTimeout(resolve, 1500)); // Espera 1.5 segundos
-      } catch (error) {
-        console.error(`  > Error al generar pregunta ${i + 1} para "${quizTitulo}":`, error.message);
-        generatedQuestions.push({
-          status: 'failed',
           quizTitulo: quizTitulo,
-          reason: error.message,
-          subcategoria: subcategoria, // Incluir información para depuración
-          id_subcategoria: idSubcategoria
+          data: pregunta
         });
-        // Continuar con la siguiente pregunta o quiz a pesar del error de una
-      }
+      });
+
+      console.log(`  > ${preguntasArray.length} preguntas generadas para "${quizTitulo}".`);
+      // Espera solo una vez por quiz
+      await new Promise(resolve => setTimeout(resolve, 1500));
+    } catch (error) {
+      console.error(`  > Error al generar preguntas para "${quizTitulo}":`, error.message);
+      generatedQuestions.push({
+        status: 'failed',
+        quizTitulo: quizTitulo,
+        reason: error.message,
+        subcategoria: subcategoria,
+        id_subcategoria: id_subcategoria
+      });
     }
   }
 

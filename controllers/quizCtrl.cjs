@@ -6,6 +6,8 @@ const {
   updateQuizSchema,
 } = require("../schemas/quizSchemas.cjs");
 const { z } = require("zod");
+// Corrige la importación de admin:
+const { admin } = require("../config/firebase.cjs");
 
 // --- Función auxiliar para calcular la subcategoría principal de un quiz ---
 async function calculateMainSubcategory(questionIds) {
@@ -565,4 +567,319 @@ exports.generateQuizNames = async (req, res) => {
         console.error('Error general durante la generación de nombres de quizzes:', error);
         res.status(500).json({ message: 'Error interno del servidor al generar nombres de quizzes.', error: error.message });
     }
+};
+
+/**
+ * Función auxiliar para extraer una subcadena JSON (asumiendo un array JSON) de un texto.
+ * Intenta encontrar el primer '[' y el último ']' para parsear,
+ * y luego limpia las cercas de Markdown si están presentes.
+ *
+ * @param {string} text - El texto completo devuelto por la IA.
+ * @returns {string|null} La subcadena JSON limpia o null si no se encuentra un JSON válido.
+ */
+function extractJsonArraySubstring(text) {
+  const firstBracket = text.indexOf('[');
+  const lastBracket = text.lastIndexOf(']');
+
+  if (firstBracket === -1 || lastBracket === -1 || lastBracket < firstBracket) {
+    return null;
+  }
+
+  let jsonSubstring = text.substring(firstBracket, lastBracket + 1);
+
+  // Limpiar cercas de Markdown si existen
+  if (jsonSubstring.startsWith('```json')) {
+    jsonSubstring = jsonSubstring.substring(7);
+  } else if (jsonSubstring.startsWith('```')) {
+    jsonSubstring = jsonSubstring.substring(3);
+  }
+  if (jsonSubstring.endsWith('```')) {
+    jsonSubstring = jsonSubstring.slice(0, -3);
+  }
+
+  return jsonSubstring.trim();
+}
+
+/**
+ * Función auxiliar para generar una única pregunta usando la IA.
+ * Construye el prompt con los detalles del quiz y el formato de salida esperado.
+ *
+ * @param {string} quizTitulo - El título del quiz para el que se genera la pregunta.
+ * @param {string} subcategoria - La subcategoría a la que pertenece el quiz.
+ * @param {string} idSubcategoria - El ID de la subcategoría.
+ * @param {string} dificultad - La dificultad deseada para la pregunta.
+ * @param {number} cantidad - La cantidad de preguntas a generar.
+ * @returns {Promise<object>} Una promesa que resuelve con el objeto de la pregunta generada o rechaza con un error.
+ */
+async function generarUnaPregunta(quizTitulo, subcategoria, idSubcategoria, dificultad, cantidad = 1) {
+  const prompt = `Genera ${cantidad} preguntas de quiz sobre el tema "${quizTitulo}" que pertenece a la subcategoría de MATEMÁTICAS "${subcategoria}".
+Cada pregunta debe tener una dificultad de **${dificultad}**.
+
+El formato de salida debe ser un array JSON de objetos, cada uno con las siguientes propiedades:
+- **enunciado**: (string) El texto de la pregunta.
+- **dificultad**: (string) La dificultad de la pregunta (debe ser "${dificultad}").
+- **opciones**: (object) Un objeto con 4 opciones (a, b, c, d) y una propiedad 'correcta' indicando la letra de la opción correcta.
+  - a: (string) Texto de la opción A.
+  - b: (string) Texto de la opción B.
+  - c: (string) Texto de la opción C.
+  - d: (string) Texto de la opción D.
+  - correcta: (string) La letra de la opción correcta (ej. "a").
+- **explicacion**: (string) Una explicación concisa (máximo 2-3 oraciones) de por qué la opción correcta es la respuesta.
+
+Asegúrate de que la respuesta sea solo el array JSON, sin texto adicional antes o después.
+
+Ejemplo de estructura de salida:
+[
+  {
+    "enunciado": "¿Cuál es la derivada de la función f(x) = x^2?",
+    "dificultad": "baja",
+    "opciones": {
+      "a": "2x",
+      "b": "x",
+      "c": "x^3/3",
+      "d": "2",
+      "correcta": "a"
+    },
+    "explicacion": "La derivada de x^n es n*x^(n-1). Para x^2, n es 2, por lo que la derivada es 2x."
+  }
+]
+`;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    let rawResponseText = response.text().trim();
+
+    const cleanedJsonString = extractJsonArraySubstring(rawResponseText);
+
+    if (cleanedJsonString === null) {
+      console.error(`No se pudo encontrar un array JSON válido en la respuesta de la IA. Respuesta original: ${rawResponseText}`);
+      throw new Error('La IA no devolvió un array JSON válido o la estructura no se pudo extraer.');
+    }
+
+    let preguntasParseadas;
+    try {
+      preguntasParseadas = JSON.parse(cleanedJsonString);
+    } catch (jsonParseError) {
+      console.error(`Error al parsear el JSON extraído:`, jsonParseError);
+      throw new Error(`La IA devolvió un formato JSON inválido: ${jsonParseError.message}. Contenido: ${cleanedJsonString}`);
+    }
+
+    if (!Array.isArray(preguntasParseadas) || preguntasParseadas.length === 0) {
+      throw new Error('La IA no generó preguntas válidas.');
+    }
+
+    // Adjuntar la id_subcategoria a cada pregunta
+    preguntasParseadas.forEach(p => {
+      p.id_subcategoria = idSubcategoria;
+    });
+
+    return preguntasParseadas;
+  } catch (error) {
+    console.error(`Error en generarUnaPregunta para ${quizTitulo}:`, error.message);
+    throw error;
+  }
+}
+
+/**
+ * Permite a los suscriptores crear un quiz personalizado generando sus preguntas mediante IA.
+ * El usuario proporciona los IDs de las subcategorías y la cantidad de preguntas deseadas.
+ *
+ * @param {object} req - Objeto de solicitud de Express.
+ * Espera body: {
+ * "nombre": "Nombre del Quiz",
+ * "dificultad": "baja" | "media" | "alta" | "muy alta", // Dificultad deseada para las preguntas
+ * "cantidad_preguntas": 10, // Cantidad total de preguntas a generar
+ * "tiempo_estimado": 30, // Tiempo estimado en minutos
+ * "main_subcategory": { "id": "...", "nombre": "..." }, // Opcional
+ * "sub_categorias": ["id1", "id2", ...] // IDs de subcategorías para generar preguntas
+ * }
+ * @param {object} res - Objeto de respuesta de Express.
+ */
+exports.createCustomQuizFromAI = async (req, res) => {
+  const {
+    nombre,
+    dificultad,
+    cantidad_preguntas,
+    tiempo_estimado,
+    main_subcategory,
+    sub_categorias
+    // user_id // <-- Eliminado
+  } = req.body;
+
+  // --- 1. Validaciones Iniciales ---
+  if (!nombre || typeof nombre !== 'string' || nombre.trim() === '') {
+    return res.status(400).json({ message: 'El campo "nombre" del quiz es requerido.' });
+  }
+  if (!dificultad || !['baja', 'media', 'alta', 'muy alta'].includes(dificultad)) {
+    return res.status(400).json({ message: 'La "dificultad" debe ser "baja", "media", "alta" o "muy alta".' });
+  }
+  if (typeof cantidad_preguntas !== 'number' || cantidad_preguntas < 1 || cantidad_preguntas > 20) {
+    return res.status(400).json({ message: 'La "cantidad_preguntas" debe ser un número entre 1 y 20.' });
+  }
+  if (!sub_categorias || !Array.isArray(sub_categorias) || sub_categorias.length === 0) {
+    return res.status(400).json({ message: 'Se debe proporcionar al menos un "id" de subcategoría para generar preguntas.' });
+  }
+  // Eliminada la validación de user_id
+
+  const quizResult = {
+    quizName: nombre,
+    quizStatus: 'pending',
+    quizId: null,
+    generatedQuestions: [],
+    error: null
+  };
+
+  let uploadedQuestionIds = [];
+  let questionsSuccessfullyGenerated = 0;
+
+  console.log(`Iniciando la creación de quiz personalizado "${nombre}".`);
+  console.log(`Se solicitarán ${cantidad_preguntas} preguntas de las subcategorías: ${sub_categorias.join(', ')}.`);
+
+  try {
+    // --- 2. Preparar y Generar Preguntas ---
+    // Estrategia: Solicitar un bloque de preguntas por cada subcategoría,
+    // distribuyendo la cantidad_preguntas deseada.
+    // Esto es una simplificación; podrías tener una lógica más compleja para distribuir.
+    const numSubcategories = sub_categorias.length;
+    let remainingQuestionsToGenerate = cantidad_preguntas;
+
+    for (let i = 0; i < numSubcategories; i++) {
+      const subcatId = sub_categorias[i];
+      if (remainingQuestionsToGenerate <= 0) break;
+
+      const questionsToRequestForThisSubcat = Math.ceil(remainingQuestionsToGenerate / (numSubcategories - i));
+      const subcatDoc = await db.collection('sub_categorias').doc(subcatId).get();
+      if (!subcatDoc.exists) {
+        console.warn(`  > Subcategoría con ID "${subcatId}" no encontrada en Firestore. Saltando.`);
+        quizResult.generatedQuestions.push({
+          status: 'skipped',
+          subcatId: subcatId,
+          reason: 'Subcategoría no existe en la base de datos.'
+        });
+        continue;
+      }
+      const subcatName = subcatDoc.data().nombre;
+
+      console.log(`  > Solicitando ${questionsToRequestForThisSubcat} preguntas para la subcategoría "${subcatName}" (ID: ${subcatId}).`);
+
+      try {
+        const generatedQuestionsArray = await generarUnaPregunta(
+          subcatName,
+          subcatName,
+          subcatId,
+          dificultad,
+          questionsToRequestForThisSubcat
+        );
+        // Si la IA devuelve un array válido, procesamos las preguntas
+        if (Array.isArray(generatedQuestionsArray) && generatedQuestionsArray.length > 0) {
+          for (const q of generatedQuestionsArray) {
+            if (questionsSuccessfullyGenerated >= cantidad_preguntas) break; // Si ya alcanzamos el límite total
+
+            try {
+              // Subir la pregunta generada individualmente a Firestore para obtener su ID
+              const newQuestionRef = await db.collection('preguntas').add(q);
+              uploadedQuestionIds.push(newQuestionRef.id);
+              questionsSuccessfullyGenerated++;
+
+              quizResult.generatedQuestions.push({
+                status: 'success',
+                subcatId: subcatId,
+                questionId: newQuestionRef.id
+              });
+              console.log(`    - Pregunta generada y subida para "${subcatName}", ID: ${newQuestionRef.id}`);
+            } catch (uploadError) {
+              // Error al subir una pregunta individual del bloque
+              quizResult.generatedQuestions.push({
+                status: 'failed_upload',
+                subcatId: subcatId,
+                error: uploadError.message
+              });
+              console.error(`    - Error al subir pregunta generada para "${subcatName}":`, uploadError.message);
+            }
+          }
+        } else {
+          // La IA no devolvió un array válido o estaba vacío
+          quizResult.generatedQuestions.push({
+            status: 'failed_generation',
+            subcatId: subcatId,
+            reason: 'La IA no devolvió preguntas válidas para esta solicitud.'
+          });
+          console.warn(`  > La IA no generó preguntas para la subcategoría "${subcatName}".`);
+        }
+
+        remainingQuestionsToGenerate -= generatedQuestionsArray.length; // Restamos las que la IA realmente generó
+
+        // Pausa entre llamadas a la IA para evitar límites de tasa
+        // Esta pausa es ahora por CADA LLAMADA a generarUnaPregunta (que ahora genera múltiples), no por pregunta individual.
+        await new Promise(resolve => setTimeout(resolve, 2500)); // Espera un poco más por bloques más grandes
+      } catch (genError) {
+        // Error general en la llamada a generarUnaPregunta (por ejemplo, timeout de la API)
+        quizResult.generatedQuestions.push({
+          status: 'failed_api_call',
+          subcatId: subcatId,
+          error: genError.message
+        });
+        console.error(`  > Error en la llamada a la API de IA para "${subcatName}":`, genError.message);
+      }
+    }
+
+    if (uploadedQuestionIds.length === 0) {
+      quizResult.quizStatus = 'failed_no_questions_generated';
+      quizResult.error = 'No se pudo generar ninguna pregunta para las subcategorías proporcionadas.';
+      return res.status(500).json({
+        message: 'Error al crear el quiz: no se generaron preguntas.',
+        result: quizResult
+      });
+    }
+
+    // --- 3. Crear el Quiz ---
+    const quizData = {
+      nombre: nombre,
+      dificultad: dificultad,
+      cantidad_preguntas: uploadedQuestionIds.length,
+      tiempo_estimado: tiempo_estimado,
+      main_subcategory: main_subcategory || null,
+      sub_categorias: sub_categorias,
+      id_preguntas: uploadedQuestionIds,
+      user_created: true,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    try {
+      const newQuizRef = await db.collection('quizzes').add(quizData);
+      quizResult.quizId = newQuizRef.id;
+      quizResult.quizStatus = 'success';
+      console.log(`  > Quiz "${nombre}" creado y subido exitosamente con ID: ${newQuizRef.id}`);
+      // --- Cambia la respuesta para incluir el ID del quiz ---
+      return res.status(201).json({
+        message: 'Quiz personalizado y preguntas generadas y subidas exitosamente.',
+        id_quiz: newQuizRef.id,
+        result: quizResult
+      });
+    } catch (quizError) {
+      quizResult.quizStatus = 'failed_quiz_creation';
+      quizResult.error = quizError.message;
+      console.error(`  > Error al crear el quiz "${nombre}":`, quizError);
+      return res.status(500).json({
+        message: 'Error al crear el quiz: falló la subida del documento del quiz.',
+        result: quizResult
+      });
+    }
+
+  } catch (generalProcessError) {
+    quizResult.quizStatus = 'failed_general_process';
+    quizResult.error = generalProcessError.message;
+    console.error(`Error general en el proceso de creación de quiz personalizado "${nombre}":`, generalProcessError);
+    return res.status(500).json({
+      message: 'Error interno del servidor al procesar la creación del quiz personalizado.',
+      result: quizResult
+    });
+  }
+
+  // --- Respuesta Exitosa ---
+  res.status(201).json({
+    message: 'Quiz personalizado y preguntas generadas y subidas exitosamente.',
+    result: quizResult
+  });
 };

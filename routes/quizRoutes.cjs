@@ -27,4 +27,7 @@ router.delete('/:id_quiz', authorizeRoles('admin'), quizCtrl.deleteQuiz);
 // Generate a quiz (Admin only)
 router.post('/generate', authorizeRoles('admin'), quizCtrl.generateQuizNames);
 
+// Create a quiz (Accessible to all authenticated users)
+router.post('/create-custom', quizCtrl.createCustomQuizFromAI);
+
 module.exports = router;
